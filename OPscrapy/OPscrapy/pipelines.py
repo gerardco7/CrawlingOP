@@ -1,32 +1,125 @@
-# Define your item pipelines here
-#
-# Don't forget to add your pipeline to the ITEM_PIPELINES setting
-# See: https://docs.scrapy.org/en/latest/topics/item-pipeline.html
-
-
-# useful for handling different item types with a single interface
-from itemadapter import ItemAdapter
-
 import psycopg2
-
+import datetime
+from itemadapter import ItemAdapter
+# import os
 
 class OpscrapyPipeline:
 
     def open_spider(self, spider):
-        conn = psycopg2.connect(
+        self.first_item = True
+
+        self.conn = psycopg2.connect(
             host="localhost",
-            database="postgres",
+            database="CardsOP",
             user="postgres",
+            # password=os.environ.get("DB_PASSWORD")
             password="bruno202122"
         )
-        self.cur = conn.cursor()
+        self.cur = self.conn.cursor()
+
+        # Check if table cardsop exists
+        self.cur.execute("""
+            SELECT EXISTS (
+                SELECT 1
+                FROM information_schema.tables
+                WHERE table_name = 'cardsop'
+            )
+        """)
+        table_exists = self.cur.fetchone()[0]
+
+        # If table doesn't exist, create it. The table priceop can't be created without cardsop, because of the foreign key
+        if not table_exists:
+            # Create card table
+            self.cur.execute("""
+                CREATE TABLE cardsop (
+                    id SERIAL PRIMARY KEY,
+                    name VARCHAR(255),
+                    collection VARCHAR(255),
+                    number INT,
+                    rarity VARCHAR(255),
+                    link VARCHAR(255),
+                    img VARCHAR(255)
+                )
+            """)
+            self.conn.commit()
+            # Create price table
+            self.cur.execute("""
+                CREATE TABLE priceop (
+                    id SERIAL PRIMARY KEY,
+                    card_id INT,
+                    price FLOAT,
+                    playset_price FLOAT,
+                    day VARCHAR(255),
+                    month VARCHAR(255),
+                    year VARCHAR(255),
+                    hour VARCHAR(255),
+                    FOREIGN KEY (card_id) REFERENCES cardsop (id)
+                )
+            """)
+            self.conn.commit()
 
     def close_spider(self, spider):
         self.cur.close()
         
     def process_item(self, item, spider):
+        adapter = ItemAdapter(item)
+
+        if adapter['number'] == 'NULL':
+            adapter['number'] = '0'
+        elif not adapter['number'].isdigit():
+            adapter['number'] = int(adapter['number'][-3:])
+        else:
+            adapter['number'] = int(adapter['number'])
+
+        if adapter['price'] != "N/A":
+            adapter['price'] = adapter['price'].replace(' €', '')  
+            adapter['price'] = adapter['price'].replace(',', '.')  
+            adapter['price'] = float(adapter['price'])
+        else:
+            adapter['price'] = 0.0
+
+        if adapter['playset_price'] != "N/A":
+            adapter['playset_price'] = adapter['playset_price'].replace(' €', '')  
+            adapter['playset_price'] = adapter['playset_price'].replace(',', '.')  
+            adapter['playset_price'] = float(adapter['playset_price'])
+        else:
+            adapter['playset_price'] = 0.0
+
+        # Get the current date. Format day, month, and year as DD/MM/YYYY
+        current_date = datetime.datetime.now()
+        adapter['day'] = current_date.day
+        adapter['month'] = current_date.month
+        adapter['year'] = current_date.year
+        adapter['hour'] = current_date.hour
+
+        # Check if card exists in the database
         self.cur.execute("""
-            INSERT INTO cartasOP (name, collection, rarity, number, price)
-            VALUES (%s, %s, %s, %s, %s)
-        """, (item['name'], item['colection'], item['rarity'], item['number'], item['price']))
+            SELECT id
+            FROM cardsop
+            WHERE name = %s AND collection = %s AND number = %s
+        """, (item['name'], item['collection'], adapter['number']))
+
+        result = self.cur.fetchone()
+        card_id = result[0] if result else None 
+
+        if card_id is None:
+            self.cur.execute("""
+                INSERT INTO cardsop (name, collection, number, rarity)
+                VALUES (%s, %s, %s, %s)
+            """, (item['name'], item['collection'], adapter['number'], item['rarity']))
+            self.conn.commit()
+            self.cur.execute("""
+                SELECT id
+                FROM cardsop
+                WHERE name = %s AND collection = %s AND number = %s
+            """, (item['name'], item['collection'], adapter['number']))
+            result = self.cur.fetchone()
+            card_id = result[0]
+
+        self.cur.execute("""
+            INSERT INTO priceop (card_id, price, playset_price, day, month, year, hour)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+        """, (card_id, adapter['price'], adapter['playset_price'], adapter['day'], adapter['month'], adapter['year'], adapter['hour']))
+        self.conn.commit()
+
         return item
