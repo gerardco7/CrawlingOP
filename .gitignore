@@ -1,3 +1,7 @@
+# Secrets
+http_proxies.txt
+DBpassword.txt
+
 # Json extensions
 *.json
 
@@ -55,6 +59,7 @@ coverage.xml
 *.py,cover
 .hypothesis/
 .pytest_cache/
+
 cover/
 
 # Translations

@@ -43,7 +43,12 @@ class CardmarketSpider(scrapy.Spider):
             try:
                 price = elements[8].xpath('.//text()').get()
             except:
-                price = "N/A"
+                try:
+                    price = elements[7].xpath('.//text()').get()
+                except:
+                    print("Error en precio")
+                    print(title)
+                    price = "N/A"
         # img = response.xpath('//div[@class="image card-image is-onepiece w-100"]/img/@src')
 
         individual_prices =  response.xpath('//*[@class="color-primary small text-end text-nowrap fw-bold "]/text()')

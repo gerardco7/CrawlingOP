@@ -1,19 +1,22 @@
 import psycopg2
 import datetime
 from itemadapter import ItemAdapter
-# import os
+
 
 class OpscrapyPipeline:
 
     def open_spider(self, spider):
         self.first_item = True
 
+        with open("DBpassword.txt", "r") as file:
+                contraseña = file.read().strip()
+
         self.conn = psycopg2.connect(
             host="localhost",
             database="CardsOP",
             user="postgres",
-            # password=os.environ.get("DB_PASSWORD")
-            password="bruno202122"
+            password=contraseña
+           
         )
         self.cur = self.conn.cursor()
 
@@ -25,10 +28,10 @@ class OpscrapyPipeline:
                 WHERE table_name = 'cardsop'
             )
         """)
-        table_exists = self.cur.fetchone()[0]
+        cardsop_exists = self.cur.fetchone()[0]
 
-        # If table doesn't exist, create it. The table priceop can't be created without cardsop, because of the foreign key
-        if not table_exists:
+        # If table doesn't exist, create it. 
+        if not cardsop_exists:
             # Create card table
             self.cur.execute("""
                 CREATE TABLE cardsop (
@@ -42,6 +45,17 @@ class OpscrapyPipeline:
                 )
             """)
             self.conn.commit()
+
+        self.cur.execute("""
+            SELECT EXISTS (
+                SELECT 1
+                FROM information_schema.tables
+                WHERE table_name = 'priceop'
+            )
+        """)
+        priceop_exists = self.cur.fetchone()[0]
+
+        if not priceop_exists:
             # Create price table
             self.cur.execute("""
                 CREATE TABLE priceop (
@@ -52,7 +66,7 @@ class OpscrapyPipeline:
                     day VARCHAR(255),
                     month VARCHAR(255),
                     year VARCHAR(255),
-                    hour VARCHAR(255),
+                    time VARCHAR(255),
                     FOREIGN KEY (card_id) REFERENCES cardsop (id)
                 )
             """)
@@ -72,6 +86,7 @@ class OpscrapyPipeline:
             adapter['number'] = int(adapter['number'])
 
         if adapter['price'] != "N/A":
+            adapter['price'] = adapter['price'].replace('.', '')
             adapter['price'] = adapter['price'].replace(' €', '')  
             adapter['price'] = adapter['price'].replace(',', '.')  
             adapter['price'] = float(adapter['price'])
@@ -79,6 +94,7 @@ class OpscrapyPipeline:
             adapter['price'] = 0.0
 
         if adapter['playset_price'] != "N/A":
+            adapter['playset_price'] = adapter['playset_price'].replace('.', '')
             adapter['playset_price'] = adapter['playset_price'].replace(' €', '')  
             adapter['playset_price'] = adapter['playset_price'].replace(',', '.')  
             adapter['playset_price'] = float(adapter['playset_price'])
@@ -90,7 +106,7 @@ class OpscrapyPipeline:
         adapter['day'] = current_date.day
         adapter['month'] = current_date.month
         adapter['year'] = current_date.year
-        adapter['hour'] = current_date.hour
+        adapter['time'] = current_date.strftime("%H:%M:%S")
 
         # Check if card exists in the database
         self.cur.execute("""
@@ -117,9 +133,9 @@ class OpscrapyPipeline:
             card_id = result[0]
 
         self.cur.execute("""
-            INSERT INTO priceop (card_id, price, playset_price, day, month, year, hour)
+            INSERT INTO priceop (card_id, price, playset_price, day, month, year, time)
             VALUES (%s, %s, %s, %s, %s, %s, %s)
-        """, (card_id, adapter['price'], adapter['playset_price'], adapter['day'], adapter['month'], adapter['year'], adapter['hour']))
+        """, (card_id, adapter['price'], adapter['playset_price'], adapter['day'], adapter['month'], adapter['year'], adapter['time']))
         self.conn.commit()
 
         return item
